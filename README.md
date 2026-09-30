@@ -1,6 +1,6 @@
 # LinkedIn Agent
 
-Agente que gera posts sobre a área de dados com o **Claude Code** e publica no LinkedIn pela **API oficial**, agendado pelo Agendador de Tarefas do Windows.
+Agente que gera posts sobre a área de dados, com imagens ilustrativas, usando o **Claude Code** e publica no LinkedIn pela **API oficial**, agendado pelo Agendador de Tarefas do Windows.
 
 Nada é publicado sem aprovação: o Claude gera rascunhos, você revisa, e só o que estiver na pasta de aprovados vai para o ar.
 
@@ -12,9 +12,9 @@ generate.py ──> queue/pending/ ──(você revisa e move)──> queue/appr
      └──────────────────────────── history.md <──────────────────────────────────┘
 ```
 
-1. **`generate.py`** monta um contexto com `guidelines.md`, o histórico de posts publicados e os posts já na fila, e chama o Claude Code em modo headless (`claude -p`). Cada rascunho é salvo em `queue/pending/`.
-2. **Você** lê os rascunhos, edita se quiser, e move os bons para `queue/approved/`.
-3. **`publish.py`** pega o post aprovado mais antigo, publica via API do LinkedIn, move o arquivo para `queue/posted/` e registra em `history.md`. Se não houver post aprovado, ele simplesmente não faz nada naquele horário.
+1. **`generate.py`** monta um contexto com `guidelines.md`, o histórico de posts publicados e os posts já na fila, e chama o Claude Code em modo headless (`claude -p`). Cada rascunho é salvo em `queue/pending/` como `.md`, junto com uma imagem `.png` de mesmo nome quando o post tiver ilustração.
+2. **Você** lê os rascunhos, edita se quiser, e move os bons (o `.md` e o `.png`) para `queue/approved/`.
+3. **`publish.py`** pega o post aprovado mais antigo, envia a imagem (se houver), publica via API do LinkedIn, move o arquivo para `queue/posted/` e registra em `history.md`. Se não houver post aprovado, ele simplesmente não faz nada naquele horário.
 4. O histórico realimenta o gerador, evitando temas e ângulos repetidos.
 
 ## Estrutura
@@ -23,6 +23,7 @@ generate.py ──> queue/pending/ ──(você revisa e move)──> queue/appr
 linkedin-agent/
 ├── auth.py               # Login OAuth no LinkedIn (salva token em config.json)
 ├── generate.py           # Gera rascunhos com o Claude Code
+├── images.py             # Desenha as imagens (código e cards)
 ├── publish.py            # Publica o próximo post aprovado
 ├── guidelines.md         # Quem você é, público, temas, estilo e regras
 ├── config.example.json   # Modelo de configuração
@@ -40,7 +41,7 @@ linkedin-agent/
 ## Pré-requisitos
 
 - Windows com Python 3 (`python --version`)
-- Biblioteca `requests`: `pip install requests`
+- Bibliotecas Python: `pip install requests pillow pygments`
 - Claude Code instalado e autenticado (`claude --version` deve funcionar no cmd)
 - Uma Página do LinkedIn (obrigatória para criar o app de desenvolvedor)
 
@@ -60,7 +61,7 @@ linkedin-agent/
 
 ```bat
 cd C:\linkedin-agent
-pip install requests
+pip install requests pillow pygments
 copy config.example.json config.json
 ```
 
@@ -87,6 +88,20 @@ python publish.py --dry-run
 python publish.py
 ```
 
+## Imagens
+
+O Claude escolhe, para cada post, um de três formatos de ilustração:
+
+- **Código:** um "print" de código com syntax highlighting (SQL, Python, Bash, YAML...), para posts técnicos.
+- **Card:** título com 2 a 4 pontos-chave, para conceitos, dicas e carreira.
+- **Nenhuma:** quando uma imagem não agrega.
+
+As imagens são quadradas (1200x1200), com tema escuro, e são desenhadas localmente pelo `images.py`, sem API externa. As fontes usadas são Segoe UI e Consolas, que já vêm no Windows. Para mudar cores ou tamanhos, edite as constantes no topo do `images.py`.
+
+**Usar uma imagem sua:** coloque um `.png`, `.jpg` ou `.jpeg` com o mesmo nome do post em `queue/approved/` (por exemplo, `20261004-180000-01.md` e `20261004-180000-01.jpg`). Se já existir um `.png` gerado, apague-o. Para publicar sem imagem, basta apagar o arquivo de imagem.
+
+O `--dry-run` mostra qual imagem seria enviada junto com o post.
+
 ## Agendamento
 
 ```bat
@@ -102,8 +117,9 @@ Para remover uma tarefa: `schtasks /delete /tn "LinkedIn Publish AM"`
 ### Rotina semanal
 
 1. Domingo à noite, abra `queue/pending/`.
-2. Leia os rascunhos, ajuste o texto se precisar e mova os bons para `queue/approved/`.
-3. Apague os que não prestaram.
+2. Leia os rascunhos e abra as imagens. Ajuste o texto se precisar.
+3. Mova os bons para `queue/approved/`, **sempre o `.md` junto com o `.png`**.
+4. Apague os que não prestaram.
 
 Com 10 aprovados por semana você cobre 5 dias com 2 posts por dia.
 
@@ -126,6 +142,8 @@ Com 10 aprovados por semana você cobre 5 dias com 2 posts por dia.
 | `Could not find 'claude' on PATH` | Claude Code não está no PATH do usuário que roda a tarefa | Testar `claude --version` no cmd |
 | `redirect_uri mismatch` no login | URL de callback diferente da cadastrada | Cadastrar exatamente `http://localhost:8000/callback` |
 | Porta 8000 ocupada no `auth.py` | Outro programa usando a porta | Fechar o programa ou trocar a porta no script e no app |
+| `Image upload failed` | Falha no envio da imagem | O post continua em `approved`; roda de novo no próximo horário. Veja `log.txt` |
+| Imagem com código cortado | Código longo demais | Encurte o código no rascunho ou apague a imagem |
 | Post não saiu no horário | Fila vazia, PC desligado ou erro | Ver `log.txt` e `queue/approved/` |
 
 ## Segurança
@@ -145,4 +163,4 @@ Se o secret vazar, gere um novo na aba **Auth** do app e rode `python auth.py` d
 
 - Revise tudo antes de aprovar: o post sai com o seu nome.
 - Mantenha a seção **"Never"** do `guidelines.md`, que impede o Claude de inventar histórias, clientes ou estatísticas.
-- Acompanhe o engajamento nas primeiras semanas.
+- Acompanhe o engajamento nas primeiras semanas. Se dois posts por dia estiverem competindo entre si, reduza para um.
